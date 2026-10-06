@@ -1,0 +1,22 @@
+{
+  "name": "acuarelas-distribuidora",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node server.mjs",
+    "dev": "node --watch server.mjs",
+    "test": "node --test tests/*.test.mjs"
+  },
+  "dependencies": {
+    "exceljs": "4.4.0",
+    "express": "5.1.0",
+    "multer": "2.4.0"
+  },
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "overrides": {
+    "uuid": "11.1.1"
+  }
+}

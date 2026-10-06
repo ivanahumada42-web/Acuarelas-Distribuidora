@@ -1,0 +1,126 @@
+{
+  "Escolar": [
+    {
+      "image": "/assets/marcas/Escolar/5.jpg",
+      "brand": "Maped"
+    },
+    {
+      "image": "/assets/marcas/Escolar/6.jpg",
+      "brand": "Keyroad"
+    },
+    {
+      "image": "/assets/marcas/Escolar/7.jpg",
+      "brand": "Pizzini"
+    },
+    {
+      "image": "/assets/marcas/Escolar/8.jpg",
+      "brand": "Triunfante"
+    },
+    {
+      "image": "/assets/marcas/Escolar/9.jpg",
+      "brand": "Éxito"
+    },
+    {
+      "image": "/assets/marcas/Escolar/10.jpg",
+      "brand": "Trabi"
+    },
+    {
+      "image": "/assets/marcas/Escolar/11.jpg",
+      "brand": "Filgo"
+    },
+    {
+      "image": "/assets/marcas/Escolar/12.jpg",
+      "brand": "MIT"
+    },
+    {
+      "image": "/assets/marcas/Escolar/13.jpg",
+      "brand": "Lama"
+    },
+    {
+      "image": "/assets/marcas/Escolar/14.jpg",
+      "brand": "CBX"
+    },
+    {
+      "image": "/assets/marcas/Escolar/15.jpg",
+      "brand": "BIC"
+    },
+    {
+      "image": "/assets/marcas/Escolar/22.jpg",
+      "brand": "Luma"
+    },
+    {
+      "image": "/assets/marcas/Escolar/23.jpg",
+      "brand": "EQ"
+    },
+    {
+      "image": "/assets/marcas/Escolar/24.jpg",
+      "brand": "SIFAP"
+    },
+    {
+      "image": "/assets/marcas/Escolar/25.jpg",
+      "brand": "Olami"
+    },
+    {
+      "image": "/assets/marcas/Escolar/26.jpg",
+      "brand": "Mooving"
+    }
+  ],
+  "Comercio": [
+    {
+      "image": "/assets/marcas/Comercio/8.jpg",
+      "brand": "Triunfante"
+    },
+    {
+      "image": "/assets/marcas/Comercio/9.jpg",
+      "brand": "Éxito"
+    },
+    {
+      "image": "/assets/marcas/Comercio/10.jpg",
+      "brand": "Trabi"
+    },
+    {
+      "image": "/assets/marcas/Comercio/12.jpg",
+      "brand": "MIT"
+    },
+    {
+      "image": "/assets/marcas/Comercio/13.jpg",
+      "brand": "Lama"
+    },
+    {
+      "image": "/assets/marcas/Comercio/15.jpg",
+      "brand": "BIC"
+    }
+  ],
+  "Agendas": [
+    {
+      "image": "/assets/marcas/Agendas/26.jpg",
+      "brand": "Mooving"
+    }
+  ],
+  "Papelera": [
+    {
+      "image": "/assets/marcas/Papelera/16.jpg",
+      "brand": "Plastivas"
+    },
+    {
+      "image": "/assets/marcas/Papelera/17.jpg",
+      "brand": "DPM"
+    },
+    {
+      "image": "/assets/marcas/Papelera/18.jpg",
+      "brand": "Banplast"
+    },
+    {
+      "image": "/assets/marcas/Papelera/19.jpg",
+      "brand": "Koviplast"
+    },
+    {
+      "image": "/assets/marcas/Papelera/20.jpg",
+      "brand": "Antártida"
+    },
+    {
+      "image": "/assets/marcas/Papelera/21.jpg",
+      "brand": "Brandpack"
+    }
+  ]
+}
