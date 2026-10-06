@@ -52,3 +52,14 @@ test('bloquea escrituras de otros orígenes y valida archivos',async()=>{
   const form=new FormData();form.append('image',new Blob(['<script>malicioso</script>'],{type:'image/png'}),'falso.png');assert.equal((await fetch(base+'/api/admin/image',{method:'POST',headers:{cookie:adminCookie},body:form})).status,400);
   assert.equal((await call('/api/products?q=%25')).data.total,0);
 });
+test('pedidos y cancelaciones simultáneos conservan el stock',async()=>{
+  const product=(await call('/api/products/2')).data;
+  const body={name:'Cliente Concurrente',email:'concurrente@test.local',phone:'1112345678',address:'Dirección de prueba 123',items:[{id:2,qty:product.stock-1}]};
+  const orders=await Promise.all([call('/api/orders',body),call('/api/orders',body)]);
+  assert.deepEqual(orders.map(order=>order.status).sort(),[200,400]);
+  assert.equal((await call('/api/products/2')).data.stock,1);
+  const id=orders.find(order=>order.status===200).data.id;
+  const cancellations=await Promise.all([call('/api/admin/orders/'+id,{status:'Cancelado'},adminCookie,'PATCH'),call('/api/admin/orders/'+id,{status:'Cancelado'},adminCookie,'PATCH')]);
+  assert.deepEqual(cancellations.map(result=>result.status).sort(),[200,400]);
+  assert.equal((await call('/api/products/2')).data.stock,product.stock);
+});

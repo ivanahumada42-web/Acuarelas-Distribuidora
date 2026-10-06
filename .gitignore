@@ -9,5 +9,11 @@ data/
 *.log
 .DS_Store
 Thumbs.db
+.vercel/
+.agents/
+skills-lock.json
 public/uploads/
 referencias.jpg
+
+.vercel
+.env*

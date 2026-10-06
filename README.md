@@ -39,6 +39,20 @@ En Administración → Importar/exportar Excel, descargar la plantilla. Columnas
 
 ## Publicación
 
+### Vercel
+
+La tienda también admite Vercel con **Turso** como base de datos persistente y **Vercel Blob** para las imágenes cargadas. El diseño, los banners y el botón de WhatsApp se sirven desde `public/`.
+
+- Variables necesarias: `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN`, `BLOB_READ_WRITE_TOKEN`, `ADMIN_EMAIL`, `ADMIN_PASSWORD` y `SEED_DEMO=false`.
+- Las integraciones de Turso y Blob están vinculadas al proyecto `acuarelas-distribuidora`. El acceso inicial de administración se guarda únicamente en `data/ACCESO-VERCEL.txt`, excluido de Git.
+- Ejecutar `npx vercel deploy --prod --yes` desde la carpeta vinculada para publicar cambios. No subir `.env.local`, `.vercel/` ni `data/` a GitHub.
+- El catálogo de producción comienza vacío: se debe importar el catálogo real antes de vender. Los productos y las imágenes de WordPress todavía no se migraron.
+- Para verificar los servicios configurados, ejecutar `node --env-file=.env.local scripts/check-storage.mjs`. Usa datos temporales y los elimina al terminar.
+- En Vercel, cargar archivos de hasta 4 MB por el límite de las peticiones de funciones. Para imágenes mayores, usar una URL HTTPS. Dividir planillas grandes en lotes cuando sea necesario.
+- La tienda se publica con un dominio `vercel.app`. El dominio comercial sigue separado hasta configurar su DNS.
+
+### Servidor con disco persistente
+
 Esta entrega corre localmente. Para publicarla, usar un servidor con Node.js 24 y **disco persistente**, HTTPS y un proxy inverso. No subirla a un hosting exclusivamente estático. Variables:
 
 ```text
