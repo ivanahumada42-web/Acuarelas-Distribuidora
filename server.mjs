@@ -3,6 +3,7 @@ import multer from 'multer';
 import ExcelJS from 'exceljs';
 import { openDatabase } from './database.mjs';
 import { put } from '@vercel/blob';
+import { categories, columns, fields, normalizeProduct } from './product-validation.mjs';
 import { randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
 import { mkdirSync, existsSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -22,8 +23,13 @@ CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY, name TEXT NOT NULL, em
 CREATE TABLE IF NOT EXISTS sessions (token TEXT PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id), expires INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS orders (id INTEGER PRIMARY KEY, user_id INTEGER REFERENCES users(id), name TEXT NOT NULL, email TEXT NOT NULL, phone TEXT NOT NULL, address TEXT NOT NULL, note TEXT NOT NULL, items TEXT NOT NULL, total INTEGER NOT NULL, price_type TEXT NOT NULL, status TEXT DEFAULT 'Pendiente', created_at TEXT DEFAULT CURRENT_TIMESTAMP);
 CREATE TABLE IF NOT EXISTS import_previews (token TEXT PRIMARY KEY, user_id INTEGER NOT NULL, payload TEXT NOT NULL, expires INTEGER NOT NULL);
-CREATE TABLE IF NOT EXISTS messages (id INTEGER PRIMARY KEY, name TEXT, email TEXT, message TEXT, created_at TEXT DEFAULT CURRENT_TIMESTAMP);`));
-const categories = ['Escolar', 'Comercio', 'Agendas', 'Papelera'];
+CREATE TABLE IF NOT EXISTS messages (id INTEGER PRIMARY KEY, name TEXT, email TEXT, message TEXT, created_at TEXT DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE IF NOT EXISTS media (id INTEGER PRIMARY KEY, filename TEXT NOT NULL, url TEXT NOT NULL UNIQUE, created_at TEXT DEFAULT CURRENT_TIMESTAMP);`));
+if (!(await db.prepare('PRAGMA table_info(products)').all()).some(column=>column.name==='subcategory')) {
+  try { await db.exec("ALTER TABLE products ADD COLUMN subcategory TEXT NOT NULL DEFAULT ''"); }
+  catch(error) { if (!(await db.prepare('PRAGMA table_info(products)').all()).some(column=>column.name==='subcategory')) throw error; }
+}
+await db.exec('CREATE INDEX IF NOT EXISTS products_subcategory ON products(category,subcategory,active);');
 const hasSearchIndex = (await db.prepare("SELECT name FROM sqlite_master WHERE name='product_search'").get());
 (await db.exec(`CREATE VIRTUAL TABLE IF NOT EXISTS product_search USING fts5(name,sku,brand,content='products',content_rowid='id',tokenize='unicode61 remove_diacritics 2');
 CREATE TRIGGER IF NOT EXISTS product_search_insert AFTER INSERT ON products BEGIN INSERT INTO product_search(rowid,name,sku,brand) VALUES(new.id,new.name,new.sku,new.brand); END;
@@ -106,15 +112,15 @@ app.post('/api/wholesale',auth,async (req,res)=>{
   (await db.prepare("UPDATE users SET company=?,tax_id=?,phone=?,address=?,wholesale_status='pending' WHERE id=?").run(company.trim(),tax_id.trim(),phone.trim(),address.trim(),req.user.id));res.json({ok:true});
 });
 app.get('/api/products',async (req,res)=>{
-  const q=String(req.query.q||'').slice(0,120);const category=String(req.query.category||'');const brand=String(req.query.brand||'');
+  const q=String(req.query.q||'').slice(0,120);const category=String(req.query.category||'');const subcategory=String(req.query.subcategory||'');const brand=String(req.query.brand||'');
   const page=Math.max(1,Math.min(10000,Number(req.query.page)||1));const size=Math.max(1,Math.min(48,Number(req.query.limit)||12));
   const conditions=['active=1'];const args=[];
   if(q){const words=q.match(/[\p{L}\p{N}]+/gu);if(words?.length){conditions.push('id IN (SELECT rowid FROM product_search WHERE product_search MATCH ?)');args.push(words.map(w=>'"'+w+'"*').join(' AND '));}else conditions.push('0');}
-  if(category){conditions.push('category=?');args.push(category);}if(brand){conditions.push('brand=?');args.push(brand);}if(req.query.featured==='1')conditions.push('featured=1');if(req.query.stock==='1')conditions.push('stock>0');
+  if(category){conditions.push('category=?');args.push(category);}if(subcategory){conditions.push('subcategory=?');args.push(subcategory);}if(brand){conditions.push('brand=?');args.push(brand);}if(req.query.featured==='1')conditions.push('featured=1');if(req.query.stock==='1')conditions.push('stock>0');
   const where=conditions.join(' AND ');const price=wholesale(req)?'wholesale':'retail';const sort={price_asc:`${price} ASC`,price_desc:`${price} DESC`,name:'name ASC',new:'id DESC'}[req.query.sort]||'featured DESC,id ASC';
   const total=(await db.prepare(`SELECT count(*) n FROM products WHERE ${where}`).get(...args)).n;
   const items=(await db.prepare(`SELECT * FROM products WHERE ${where} ORDER BY ${sort} LIMIT ? OFFSET ?`).all(...args,size,(page-1)*size)).map(p=>productView(p,req));
-  res.json({items,total,page,pages:Math.ceil(total/size),brands:(await db.prepare('SELECT DISTINCT brand FROM products WHERE active=1 ORDER BY brand').all()).map(x=>x.brand)});
+  res.json({items,total,page,pages:Math.ceil(total/size),brands:(await db.prepare('SELECT DISTINCT brand FROM products WHERE active=1 ORDER BY brand').all()).map(x=>x.brand),subcategories:(await db.prepare(`SELECT DISTINCT subcategory FROM products WHERE active=1 AND subcategory<>'' ${category?'AND category=?':''} ORDER BY subcategory`).all(...(category?[category]:[]))).map(x=>x.subcategory)});
 });
 app.get('/api/products/:id',async (req,res)=>{const p=(await db.prepare('SELECT * FROM products WHERE id=? AND active=1').get(Number(req.params.id)));return p?res.json(productView(p,req)):fail(res,404,'Producto no encontrado.');});
 app.post('/api/orders',limit,async (req,res)=>{
@@ -129,6 +135,8 @@ app.post('/api/orders',limit,async (req,res)=>{
 app.get('/api/orders',auth,async (req,res)=>res.json((await db.prepare('SELECT * FROM orders WHERE user_id=? ORDER BY id DESC').all(req.user.id)).map(o=>({...o,total:o.total/100,items:JSON.parse(o.items)}))));
 app.post('/api/contact',limit,async (req,res)=>{const {name,email,message}=req.body;if(typeof name!=='string'||name.length<2||name.length>100||typeof email!=='string'||!/^\S+@\S+\.\S+$/.test(email)||typeof message!=='string'||message.length<10||message.length>2000)return fail(res,400,'Completá tu nombre, email y una consulta de al menos 10 caracteres.');(await db.prepare('INSERT INTO messages(name,email,message) VALUES(?,?,?)').run(name,email,message));res.json({ok:true});});
 app.use('/api/admin',admin);
+app.get('/api/admin/config',(req,res)=>res.json({uploadLimitMb,maxImportRows:10000,categories}));
+app.get('/api/admin/images',async(req,res)=>{const page=Math.max(1,Math.floor(Number(req.query.page)||1));res.json({items:await db.prepare('SELECT * FROM media ORDER BY id DESC LIMIT 40 OFFSET ?').all((page-1)*40),page,total:(await db.prepare('SELECT count(*) n FROM media').get()).n});});
 app.get('/api/admin/overview',async (req,res)=>res.json({products:(await db.prepare('SELECT count(*) n FROM products WHERE active=1').get()).n,pending:(await db.prepare("SELECT count(*) n FROM users WHERE wholesale_status='pending'").get()).n,orders:(await db.prepare('SELECT count(*) n FROM orders').get()).n,lowStock:(await db.prepare('SELECT count(*) n FROM products WHERE stock<10 AND active=1').get()).n}));
 app.get('/api/admin/requests',async (req,res)=>res.json((await db.prepare("SELECT id,name,email,company,tax_id,phone,address,wholesale_status FROM users WHERE wholesale_status<>'none' ORDER BY created_at DESC").all())));
 app.patch('/api/admin/requests/:id',async (req,res)=>{if(!['approved','rejected','pending'].includes(req.body.status))return fail(res,400,'Estado inválido.');const result=(await db.prepare("UPDATE users SET wholesale_status=? WHERE id=? AND role<>'admin'").run(req.body.status,Number(req.params.id)));if(!result.changes)return fail(res,404,'Solicitud no encontrada.');res.json({ok:true});});
@@ -136,15 +144,6 @@ app.get('/api/admin/orders',async (req,res)=>res.json((await db.prepare('SELECT 
 app.patch('/api/admin/orders/:id',async (req,res)=>{if(!['Pendiente','Confirmado','En preparación','Despachado','Cancelado'].includes(req.body.status))return fail(res,400,'Estado inválido.');try{await db.transaction(async()=>{const order=(await db.prepare('SELECT * FROM orders WHERE id=?').get(Number(req.params.id)));if(!order)throw new Error('Pedido no encontrado.');if(order.status==='Cancelado')throw new Error('Un pedido cancelado no se puede reactivar.');if(req.body.status==='Cancelado')for(const l of JSON.parse(order.items))(await db.prepare('UPDATE products SET stock=stock+? WHERE id=?').run(l.qty,l.id));(await db.prepare('UPDATE orders SET status=? WHERE id=?').run(req.body.status,order.id));});res.json({ok:true});}catch(e){fail(res,400,e.message);}});
 app.get('/api/admin/messages',async (req,res)=>res.json((await db.prepare('SELECT * FROM messages ORDER BY id DESC LIMIT 300').all())));
 app.get('/api/admin/products',async (req,res)=>{const page=Math.max(1,Number(req.query.page)||1);const q='%'+String(req.query.q||'').slice(0,100)+'%';res.json({items:(await db.prepare('SELECT * FROM products WHERE name LIKE ? OR sku LIKE ? ORDER BY id DESC LIMIT 30 OFFSET ?').all(q,q,(page-1)*30)).map(p=>({...p,retail:p.retail/100,wholesale:p.wholesale/100})),total:(await db.prepare('SELECT count(*) n FROM products WHERE name LIKE ? OR sku LIKE ?').get(q,q)).n,page});});
-const fields=['sku','name','brand','category','description','retail','wholesale','stock','min_qty','image','featured','active'];
-function normalizeProduct(row){
-  const out={};for(const key of ['sku','name','brand','category','description','image'])out[key]=String(row[key]??'').trim();
-  if(!out.sku||out.sku.length>80||!out.name||out.name.length>180||!out.brand||out.brand.length>100||!categories.includes(out.category)||out.description.length>3000)throw new Error('SKU, nombre, marca o categoría inválidos.');
-  if(out.image && !(/^https:\/\//.test(out.image)||/^\/(assets|uploads)\/[a-zA-Z0-9._-]+$/.test(out.image)))throw new Error('La imagen debe ser una URL HTTPS o un archivo cargado en el panel.');
-  for(const key of ['retail','wholesale']){const n=Number(row[key]);if(!Number.isFinite(n)||n<0||n>100000000||row[key]===''||row[key]==null)throw new Error('Los precios deben ser números positivos o cero.');out[key]=Math.round(n*100);}
-  for(const key of ['stock','min_qty']){const n=Number(row[key]??(key==='stock'?0:1));if(!Number.isInteger(n)||n<(key==='stock'?0:1)||n>1000000)throw new Error('Stock y mínimo mayorista deben ser enteros válidos.');out[key]=n;}
-  out.featured=Number(row.featured??0);out.active=Number(row.active??1);if(![0,1].includes(out.featured)||![0,1].includes(out.active))throw new Error('Destacado y activo deben ser 0 o 1.');return out;
-}
 const upsert=db.prepare(`INSERT INTO products(${fields.join(',')}) VALUES(${fields.map(()=>'?').join(',')}) ON CONFLICT(sku) DO UPDATE SET ${fields.filter(k=>k!=='sku').map(k=>`${k}=excluded.${k}`).join(',')}`);
 app.post('/api/admin/products',async (req,res)=>{try{const p=normalizeProduct(req.body);(await upsert.run(...fields.map(k=>p[k])));res.json({ok:true});}catch(e){fail(res,400,e.message);}});
 app.delete('/api/admin/products/:id',async (req,res)=>{(await db.prepare('UPDATE products SET active=0 WHERE id=?').run(Number(req.params.id)));res.json({ok:true});});
@@ -154,26 +153,55 @@ app.post('/api/admin/image',upload.single('image'),async (req,res)=>{
   const f=req.file;if(!f)return fail(res,400,'Seleccioná una imagen.');const b=f.buffer;
   const type=b.subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10]))?'png':b[0]===255&&b[1]===216&&b[2]===255?'jpg':b.toString('ascii',0,4)==='RIFF'&&b.toString('ascii',8,12)==='WEBP'?'webp':null;
   if(!type)return fail(res,400,'Usá una imagen JPG, PNG o WebP.');const name=randomBytes(16).toString('hex')+'.'+type;
-  if(process.env.BLOB_READ_WRITE_TOKEN){const blob=await put('productos/'+name,b,{access:'public',contentType:{jpg:'image/jpeg',png:'image/png',webp:'image/webp'}[type],addRandomSuffix:false});return res.json({url:blob.url});}
+  if(process.env.BLOB_READ_WRITE_TOKEN){const blob=await put('productos/'+name,b,{access:'public',contentType:{jpg:'image/jpeg',png:'image/png',webp:'image/webp'}[type],addRandomSuffix:false});await db.prepare('INSERT INTO media(filename,url) VALUES(?,?)').run(f.originalname.slice(0,200),blob.url);return res.json({url:blob.url});}
   if(process.env.VERCEL)return fail(res,503,'El almacenamiento de imágenes no está configurado.');
-  writeFileSync(path.join(root,'public/uploads',name),b);res.json({url:'/uploads/'+name});
+  writeFileSync(path.join(root,'public/uploads',name),b);const url='/uploads/'+name;await db.prepare('INSERT INTO media(filename,url) VALUES(?,?)').run(f.originalname.slice(0,200),url);res.json({url});
 });
-const columns=[['sku','SKU'],['name','Nombre'],['brand','Marca'],['category','Categoria'],['description','Descripcion'],['retail','Precio minorista'],['wholesale','Precio mayorista'],['stock','Stock'],['min_qty','Minimo mayorista'],['image','Imagen URL'],['featured','Destacado'],['active','Activo']];
 app.get('/api/admin/excel',async(req,res)=>{
   const wb=new ExcelJS.Workbook();wb.creator='Acuarelas Distribuidora';const ws=wb.addWorksheet('Productos');ws.columns=columns.map(([key,header])=>({key,header,width:['name','description','image'].includes(key)?42:20}));
-  const rows=req.query.template==='1'?[{sku:'EJEMPLO-001',name:'Producto de ejemplo',brand:'Marca',category:'Escolar',description:'Reemplazar antes de importar',retail:1000,wholesale:750,stock:10,min_qty:1,image:'',featured:0,active:1}]:(await db.prepare('SELECT * FROM products ORDER BY sku').all()).map(p=>({...p,retail:p.retail/100,wholesale:p.wholesale/100}));
-  ws.addRows(rows);ws.views=[{state:'frozen',ySplit:1}];ws.autoFilter={from:'A1',to:'L1'};ws.getRow(1).font={bold:true,color:{argb:'FFFFFFFF'}};ws.getRow(1).fill={type:'pattern',pattern:'solid',fgColor:{argb:'FF5B3265'}};ws.getColumn('retail').numFmt='"$" #,##0.00';ws.getColumn('wholesale').numFmt='"$" #,##0.00';
-  const help=wb.addWorksheet('Instrucciones');help.getColumn(1).width=115;['Acuarelas Distribuidora · Catálogo','Una fila por SKU. Los SKU existentes se actualizan; los nuevos se agregan.','Categorías permitidas: Escolar, Comercio, Agendas, Papelera.','Precios numéricos en pesos argentinos, sin símbolos ni separadores escritos como texto.','Stock: entero >= 0. Mínimo mayorista: entero >= 1. Destacado y Activo: 0 o 1.','Imagen URL: URL HTTPS pública o ruta de una imagen cargada desde el panel.','La importación primero valida y muestra un resumen; confirmar para guardar.','Nunca compartir esta planilla con clientes: contiene precios mayoristas.'].forEach(t=>help.addRow([t]));
+  const rows=req.query.template==='1'?[{sku:'EJEMPLO-001',name:'Producto de ejemplo',brand:'Marca',category:'Escolar',subcategory:'Bolígrafos',description:'Reemplazar antes de importar',retail:1000,wholesale:750,stock:10,min_qty:1,image:'',featured:0,active:1}]:(await db.prepare('SELECT * FROM products ORDER BY sku').all()).map(p=>({...p,retail:p.retail/100,wholesale:p.wholesale/100}));
+  ws.addRows(rows);ws.views=[{state:'frozen',ySplit:1}];ws.autoFilter={from:'A1',to:'M1'};ws.getRow(1).font={bold:true,color:{argb:'FFFFFFFF'}};ws.getRow(1).fill={type:'pattern',pattern:'solid',fgColor:{argb:'FFCD347D'}};ws.getColumn('retail').numFmt='"$" #,##0.00';ws.getColumn('wholesale').numFmt='"$" #,##0.00';
+  const help=wb.addWorksheet('Instrucciones');help.getColumn(1).width=115;['Acuarelas Distribuidora · Catálogo','Una fila por SKU. Los SKU existentes se actualizan; los nuevos se agregan.','Categoria: Escolar, Comercio, Agendas o Papelera. Subcategoria: nombre libre, hasta 100 caracteres; puede quedar vacío.','También se acepta Categoria = Escolar > Acrilicos. El sistema separa ambos niveles. No ingreses dos subcategorías distintas para el mismo artículo.','Precios en pesos: celda numérica, 5000, 5000,00 o 5.000,50. Sin fórmulas ni símbolos $.','Stock: entero >= 0 (vacío = 0). Minimo mayorista: entero >= 1 (vacío = 1).','Destacado y Activo: 1 o Sí para activar, 0 o No para desactivar. Destacado vacío = 0; Activo vacío = 1.','Imagen URL: Administración → Imágenes → Subir imágenes → Copiar URL; pegar el enlace en esta columna. Una imagen por artículo.','Formatos de imágenes: JPG, PNG o WebP. Máximo '+uploadLimitMb+' MB por imagen o planilla en este servidor.','La importación primero valida y muestra los campos interpretados; confirmar para guardar.','Los errores indican fila, columna, valor recibido y corrección. No se guarda ningún artículo si hay errores.','Nunca compartir esta planilla con clientes: contiene precios mayoristas.'].forEach(t=>help.addRow([t]));
   res.set('Content-Disposition',`attachment; filename="acuarelas-${req.query.template==='1'?'plantilla':'catalogo'}.xlsx"`);res.type('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet').send(Buffer.from(await wb.xlsx.writeBuffer()));
 });
 app.post('/api/admin/import/preview',upload.single('file'),async(req,res)=>{
   if(!req.file||!req.file.originalname.toLowerCase().endsWith('.xlsx'))return fail(res,400,`Seleccioná una planilla .xlsx de hasta ${uploadLimitMb} MB.`);
   try{const wb=new ExcelJS.Workbook();await wb.xlsx.load(req.file.buffer);const ws=wb.getWorksheet('Productos')||wb.worksheets[0];if(!ws||ws.rowCount>10001)return fail(res,400,'La planilla admite hasta 10.000 artículos.');
-    const headers=ws.getRow(1).values;const indexes=columns.map(([,h])=>headers.indexOf(h));if(indexes.some(i=>i<1))return fail(res,400,'Las columnas no coinciden. Descargá la plantilla de Excel.');
-    const rows=[],errors=[],seen=new Set();let added=0,updated=0;const existing=new Set((await db.prepare('SELECT sku FROM products').all()).map(p=>p.sku));
-    for(let i=2;i<=ws.rowCount;i++){const r=ws.getRow(i);if(!r.hasValues)continue;try{const obj={};columns.forEach(([k],j)=>{const c=r.getCell(indexes[j]);if(c.type===ExcelJS.ValueType.Formula)throw new Error('Usá valores, no fórmulas.');obj[k]=c.value?.text??c.value??'';});const p=normalizeProduct(obj);if(seen.has(p.sku))throw new Error('SKU duplicado dentro de la planilla.');seen.add(p.sku);if(existing.has(p.sku))updated++;else added++;rows.push(p);}catch(e){errors.push({row:i,error:e.message});}}
+    const headerKey=value=>String(value??'').normalize('NFD').replace(/\p{M}/gu,'').trim().toLowerCase().replace(/\s+/g,' ');
+    const headers=ws.getRow(1).values;const indexes=columns.map(([,h])=>headers.findIndex(value=>headerKey(value)===headerKey(h)));
+    const missing=columns.filter(([key],j)=>key!=='subcategory'&&indexes[j]<1).map(([,header])=>header);
+    if(missing.length)return fail(res,400,'Faltan estas columnas en la fila 1: '+missing.join(', ')+'. Descargá la plantilla o agregá esos encabezados.');
+    const duplicates=columns.filter(([,header])=>headers.filter(value=>headerKey(value)===headerKey(header)).length>1).map(([,header])=>header);
+    if(duplicates.length)return fail(res,400,'Hay encabezados repetidos: '+duplicates.join(', ')+'. Dejá una sola columna para cada campo.');
+    const rows=[],errors=[],seen=new Map(),invalidRows=new Set();let added=0,updated=0,missingImages=0;
+    const existing=new Map((await db.prepare('SELECT sku,category,subcategory FROM products').all()).map(p=>[p.sku,p]));
+    const normalizations={hierarchies:0,decimalPrices:0,yesNo:0};
+    for(let i=2;i<=ws.rowCount;i++){
+      const r=ws.getRow(i);if(!r.hasValues)continue;
+      const obj={},cellIssues=[];
+      columns.forEach(([key,field],j)=>{
+        if(indexes[j]<1)return;
+        const cell=r.getCell(indexes[j]);
+        if(cell.type===ExcelJS.ValueType.Formula)cellIssues.push({field,value:'='+cell.formula,error:'Reemplazá la fórmula por su valor. No se importan fórmulas.'});
+        obj[key]=cell.value?.richText?cell.value.richText.map(part=>part.text).join(''):cell.value?.text??cell.value??'';
+      });
+      if(Object.values(obj).every(value=>value==null||String(value).trim()===''))continue;
+      const sku=String(obj.sku??'').trim();
+      if(sku&&seen.has(sku))cellIssues.push({field:'SKU',value:sku,error:`Está repetido en la fila ${seen.get(sku)}. Cada SKU debe aparecer una sola vez.`});
+      else if(sku)seen.set(sku,i);
+      let p;
+      try{p=normalizeProduct(obj);}catch(error){for(const issue of error.issues||[{field:'Artículo',value:'',error:error.message}])if(!cellIssues.some(previous=>previous.field===issue.field))cellIssues.push(issue);}
+      if(cellIssues.length){invalidRows.add(i);for(const issue of cellIssues){const j=columns.findIndex(([,field])=>field===issue.field);errors.push({row:i,column:j>=0&&indexes[j]>0?ws.getColumn(indexes[j]).letter:'',...issue});}continue;}
+      if(indexes[columns.findIndex(([key])=>key==='subcategory')]<1&&!String(obj.category).includes('>')&&existing.get(p.sku)?.category===p.category)p.subcategory=existing.get(p.sku).subcategory;
+      if(existing.has(p.sku))updated++;else added++;
+      if(String(obj.category).includes('>'))normalizations.hierarchies++;
+      if(['retail','wholesale'].some(key=>typeof obj[key]==='string'&&obj[key].includes(',')))normalizations.decimalPrices++;
+      if(['active','featured'].some(key=>/^(s[ií]|no)$/i.test(String(obj[key]).trim())))normalizations.yesNo++;
+      if(!p.image)missingImages++;
+      rows.push(p);
+    }
     if(!rows.length&&!errors.length)return fail(res,400,'La planilla no contiene productos.');
-    const token=errors.length?null:randomBytes(24).toString('hex');if(token)(await db.prepare('INSERT INTO import_previews VALUES(?,?,?,?)').run(token,req.user.id,JSON.stringify(rows),Date.now()+900000));res.json({token,added,updated,total:rows.length,errors:errors.slice(0,100),errorCount:errors.length});
+    const token=errors.length?null:randomBytes(24).toString('hex');if(token)(await db.prepare('INSERT INTO import_previews VALUES(?,?,?,?)').run(token,req.user.id,JSON.stringify(rows),Date.now()+900000));res.json({token,added,updated,total:rows.length,errors:errors.slice(0,200),errorCount:errors.length,invalidRows:invalidRows.size,missingImages,normalizations,preview:rows.slice(0,5).map(p=>({sku:p.sku,name:p.name,category:p.category,subcategory:p.subcategory,retail:p.retail/100,wholesale:p.wholesale/100,active:p.active}))});
   }catch{return fail(res,400,'No se pudo leer el Excel. Usá un archivo .xlsx válido.');}
 });
 app.post('/api/admin/import/confirm',async (req,res)=>{
@@ -183,7 +211,7 @@ app.post('/api/admin/import/confirm',async (req,res)=>{
 app.use('/api',(req,res)=>fail(res,404,'Recurso no encontrado.'));
 app.use(express.static(path.join(root,'public'),{maxAge:process.env.NODE_ENV==='production'?'1h':0}));
 app.get('/{*path}',(req,res)=>res.sendFile(path.join(root,'public/index.html')));
-app.use((err,req,res,next)=>{console.error(err.message);fail(res,err.status||400,err.code==='LIMIT_FILE_SIZE'?'El archivo supera el límite de 10 MB.':'No se pudo completar la operación. Revisá los datos e intentá nuevamente.');});
+app.use((err,req,res,next)=>{console.error(err.message);fail(res,err.status||400,err.code==='LIMIT_FILE_SIZE'?`El archivo supera el límite de ${uploadLimitMb} MB. Comprimí la imagen o dividí la planilla en lotes.`:'No se pudo completar la operación. Revisá los datos e intentá nuevamente.');});
 const port=process.env.PORT===undefined?3000:Number(process.env.PORT);
 const server=process.env.VERCEL?null:app.listen(port,process.env.HOST||'127.0.0.1',()=>console.log(`Acuarelas disponible en http://localhost:${server.address().port}`));
 export {app,db,server,normalizeProduct};

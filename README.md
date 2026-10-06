@@ -17,6 +17,8 @@ La base se guarda en `data/acuarelas.sqlite`. Reiniciar no borra productos, cuen
 - Banners de marcas separados por categoría en un carrusel lateral compacto, con imágenes completas y enlaces al catálogo filtrado. En celular se muestran arriba de los productos. Para sincronizar cambios en `Imagenes/Banners de marcas`, ejecutar `node scripts/sync-category-banners.mjs`.
 - Catálogo paginado, búsqueda indexada FTS5 por nombre/SKU/marca (ignora tildes y admite prefijos), filtros por categoría, marca, disponibilidad y orden por precio.
 - Ficha de artículo, carrito persistente en el navegador y envío de pedidos.
+- Subcategorías libres dentro de Escolar, Comercio, Agendas y Papelera, con filtro público y edición por artículo.
+- Biblioteca de imágenes en Administración → Imágenes: admite varias fotos, conserva sus URL y permite copiarlas para la planilla o el editor.
 - Registro, acceso, historial de pedidos y cambio de contraseña.
 - Solicitud mayorista, revisión/aprobación/rechazo/revocación desde administración. Los precios se deciden en el servidor según los permisos actuales de cada sesión.
 - Panel de artículos: alta, edición, desactivación, foto JPG/PNG/WebP y URL HTTPS.
@@ -28,13 +30,15 @@ La base se guarda en `data/acuarelas.sqlite`. Reiniciar no borra productos, cuen
 
 Los 12 productos iniciales son **ejemplos**, con precios, existencias e ilustraciones de demostración. No constituyen información comercial real. Los banners provienen de la carpeta `Imagenes`; los dibujos SVG son ilustraciones de muestra y se pueden reemplazar por fotos.
 
-En Administración → Importar/exportar Excel, descargar la plantilla. Columnas obligatorias: `SKU`, `Nombre`, `Marca`, `Categoria`, `Descripcion`, `Precio minorista`, `Precio mayorista`, `Stock`, `Minimo mayorista`, `Imagen URL`, `Destacado`, `Activo`.
+En Administración → Importar/exportar Excel, descargar la plantilla. Columnas obligatorias: `SKU`, `Nombre`, `Marca`, `Categoria`, `Descripcion`, `Precio minorista`, `Precio mayorista`, `Stock`, `Minimo mayorista`, `Imagen URL`, `Destacado`, `Activo`. La columna adicional `Subcategoria` es opcional para mantener compatibles las planillas anteriores.
 
-- Categorías exactas: **Escolar**, **Comercio**, **Agendas**, **Papelera**.
-- Precios: celdas numéricas en ARS, sin fórmulas. Stock: entero >= 0. Mínimo: entero >= 1. Activo/destacado: 0 o 1.
+- Categorías: **Escolar**, **Comercio**, **Agendas**, **Papelera**. Subcategoría: nombre libre, hasta 100 caracteres, un nivel. Se puede ingresar por separado o como `Escolar > Acrilicos` en `Categoria`. Si se usan ambos formatos deben coincidir.
+- Precios: celdas numéricas en ARS o textos como `5000`, `5000,00` o `5.000,50`, sin fórmulas ni símbolos de moneda. Stock: entero >= 0. Mínimo: entero >= 1. Activo/destacado: 0 o 1, Sí o No.
+- La validación muestra todos los campos incorrectos de cada fila: letra de columna, nombre, valor recibido y corrección. La vista previa muestra los valores interpretados antes de confirmar.
 - SKU único, estable. Los productos existentes se actualizan; los nuevos se agregan.
 - La carga admite hasta 10.000 filas y 10 MB. Se validó un catálogo de 8.000 artículos mediante pruebas automatizadas.
 - Imagen: enlace HTTPS público o ruta obtenida cargando una foto en el editor. La planilla referencia imágenes; no importa fotos incrustadas en Excel.
+- Para obtener las URL: Administración → Imágenes → seleccionar fotos → Copiar URL. Pegar cada URL en `Imagen URL` de su artículo. Las imágenes subidas en Vercel se guardan en Vercel Blob y quedan disponibles en la biblioteca.
 - Desactivar o reemplazar los SKU de muestra antes de usar comercialmente.
 
 ## Publicación

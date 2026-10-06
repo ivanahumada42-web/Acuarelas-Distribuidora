@@ -63,3 +63,39 @@ test('pedidos y cancelaciones simultáneos conservan el stock',async()=>{
   assert.deepEqual(cancellations.map(result=>result.status).sort(),[200,400]);
   assert.equal((await call('/api/products/2')).data.stock,product.stock);
 });
+test('Excel interpreta subcategorías, coma decimal y Sí/No sin guardar antes de confirmar',async()=>{
+  const wb=new ExcelJS.Workbook(),ws=wb.addWorksheet('Productos');
+  ws.addRow(['SKU','Nombre','Marca','Categoria','Descripcion','Precio minorista','Precio mayorista','Stock','Minimo mayorista','Imagen URL','Destacado','Activo','Subcategoría']);
+  ws.addRow(['SUB-001','Acrílico amarillo','EQ','Escolar > Acrilicos','','5.000,50','3420',100,6,'','','SI','']);
+  ws.addRow(['SUB-002','Bolígrafo azul','BIC','Comercio','','5000,00',3000,50,1,'','NO','Sí','Bolígrafos']);
+  const preview=await excelUpload(await wb.xlsx.writeBuffer(),adminCookie);
+  assert.equal(preview.data.errorCount,0);assert.equal(preview.data.total,2);
+  assert.equal(preview.data.preview[0].category,'Escolar');assert.equal(preview.data.preview[0].subcategory,'Acrilicos');assert.equal(preview.data.preview[0].retail,5000.5);assert.equal(preview.data.preview[0].active,1);
+  assert.equal((await call('/api/products?q=SUB-001')).data.total,0);
+  assert.equal((await call('/api/admin/import/confirm',{token:preview.data.token},adminCookie)).status,200);
+  const school=await call('/api/products?category=Escolar&subcategory=Acrilicos');assert.equal(school.data.total,1);assert.ok(school.data.subcategories.includes('Acrilicos'));assert.equal(school.data.items[0].subcategory,'Acrilicos');assert.equal('wholesale' in school.data.items[0],false);
+  assert.equal((await call('/api/products?category=Papelera&subcategory=Acrilicos')).data.total,0);
+  const exported=await fetch(base+'/api/admin/excel',{headers:{cookie:adminCookie}}),roundtrip=new ExcelJS.Workbook();await roundtrip.xlsx.load(Buffer.from(await exported.arrayBuffer()));
+  assert.equal(roundtrip.getWorksheet('Productos').getCell('M1').value,'Subcategoria');
+  assert.equal((await excelUpload(await roundtrip.xlsx.writeBuffer(),adminCookie)).data.errorCount,0);
+});
+test('la validación informa todos los campos incorrectos con fila y columna',async()=>{
+  const wb=new ExcelJS.Workbook(),ws=wb.addWorksheet('Productos');
+  ws.addRow(['SKU','Nombre','Marca','Categoria','Descripcion','Precio minorista','Precio mayorista','Stock','Minimo mayorista','Imagen URL','Destacado','Activo']);
+  ws.addRow(['ERRORES-001','','EQ','Categoría inexistente','','precio incorrecto',3000,2.5,0,'http://ejemplo.com/foto.jpg','tal vez','tal vez']);
+  const result=await excelUpload(await wb.xlsx.writeBuffer(),adminCookie);
+  assert.equal(result.data.token,null);assert.equal(result.data.invalidRows,1);assert.equal(result.data.errorCount,8);
+  const price=result.data.errors.find(issue=>issue.field==='Precio minorista');assert.equal(price.row,2);assert.equal(price.column,'F');assert.equal(price.value,'precio incorrecto');assert.match(price.error,/5000,00/);
+  assert.ok(result.data.errors.some(issue=>issue.field==='Nombre'));
+  assert.equal((await call('/api/products?q=ERRORES-001')).data.total,0);
+  ws.getRow(1).getCell(1).value='Código distinto';
+  const missing=await excelUpload(await wb.xlsx.writeBuffer(),adminCookie);assert.equal(missing.status,400);assert.match(missing.data.error,/Faltan estas columnas.*SKU/);
+});
+test('biblioteca de imágenes exige administración y conserva la URL subida',async()=>{
+  assert.equal((await call('/api/admin/images')).status,403);
+  const form=new FormData();form.append('image',new Blob([Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/l1kAAAAASUVORK5CYII=','base64')],{type:'image/png'}),'foto-prueba.png');
+  const response=await fetch(base+'/api/admin/image',{method:'POST',headers:{cookie:adminCookie},body:form});assert.equal(response.status,200);const {url}=await response.json();
+  const gallery=(await call('/api/admin/images',undefined,adminCookie)).data;
+  assert.equal(gallery.items[0].filename,'foto-prueba.png');assert.equal(gallery.items[0].url,url);
+  assert.equal((await fetch(base+url)).status,200);
+});
