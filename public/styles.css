@@ -76,7 +76,7 @@ input:focus,select:focus,textarea:focus,a:focus-visible,button:focus-visible{out
 .banner-dot.is-current:before{width:18px;border-radius:6px;background:var(--brand-pink)}
 .banner-pause{background:var(--brand-pink-soft);color:var(--brand-pink-text);border-radius:50%;width:27px;height:27px;font-size:12px;padding:0}
 .home-brand-carousel{min-width:0;border-radius:9px;overflow:hidden}
-.home-brand-carousel .banner-controls{position:absolute;bottom:8px;right:8px;gap:6px;padding:3px 6px;border:0;border-radius:999px;background:#ffffffed;box-shadow:0 2px 8px #52223c14}
+.home-brand-carousel .banner-controls{position:absolute;z-index:3;bottom:8px;right:8px;gap:6px;padding:3px 6px;border:0;border-radius:999px;background:#ffffffed;box-shadow:0 2px 8px #52223c14}
 .home-brand-carousel .banner-dot{width:16px;height:20px}
 .home-brand-carousel .banner-dot.is-current:before{width:12px}
 .brand-banners .home-brand-carousel a:hover img{transform:none}
